@@ -1,11 +1,15 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
-using MemeMachine4.PluginBase;
+using System.Collections.Generic;
+
 using HtmlAgilityPack;
 
-using Mister4Eyes.ArgParser;
 using Discord.WebSocket;
+
+using Mister4Eyes.ArgParser;
+
+using MemeMachine4.PluginBase;
+
 
 namespace Random_Ow_Picker
 {
@@ -30,7 +34,7 @@ namespace Random_Ow_Picker
 		public Random_Ow_Picker(PluginArgs pag) : base(pag)
 		{
 			Name = "Random hero picker.";
-			UsedFunctions = Functions.ChannelUpdated;
+			UsedFunctions = Functions.MessageReceived;
 			Heros = GetHeros();
 		}
 

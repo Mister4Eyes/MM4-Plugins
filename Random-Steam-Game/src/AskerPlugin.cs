@@ -59,6 +59,8 @@ namespace Random_Steam_Game
 					Save();
 					pMinute = cMinute;
 				}
+
+				Task.Delay(30000);
 			}
 
 			return Task.CompletedTask;

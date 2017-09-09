@@ -1,7 +1,12 @@
 using System;
 using System.IO;
-using System.Collections.Generic;
 using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
+
+using Discord;
+using Discord.Rest;
 using Discord.WebSocket;
 
 using MemeMachine4.PluginBase;
@@ -11,16 +16,23 @@ using Mister4Eyes.GeneralUtilities;
 
 using Youtube_Player.src;
 
-using Discord;
-using System.Text.RegularExpressions;
 
 public class YoutubePlayer : Plugin
 {
 	const string pattern = @"(?:(?:youtu\.be\/)|(?:watch\?v=))([\w\-]{11})";
 	string YoutubeDl = string.Empty;
 	YoutubeDownloader ytd;
-
+	bool running = true;
+	Task dLoop;
 	Dictionary<string, string> CachedVideos = new Dictionary<string, string>();
+	ConcurrentQueue<Tuple<string, SocketMessage>> downloadQueue = new ConcurrentQueue<Tuple<string, SocketMessage>>();
+
+	~YoutubePlayer()
+	{
+		running = false;
+		Console.WriteLine("Waiting for loop to shut down.");
+		dLoop.Wait();
+	}
 	public YoutubePlayer(PluginArgs pag) : base(pag)
 	{
 		if(pag.section != null)
@@ -28,6 +40,8 @@ public class YoutubePlayer : Plugin
 			if (pag.section.HasKey("youtubeDL"))
 			{
 				YoutubeDl = pag.section.GetValue("youtubeDL");
+				dLoop = Task.Run(DownloadLoop);
+				
 			}
 
 			if (!File.Exists(YoutubeDl))
@@ -42,6 +56,8 @@ public class YoutubePlayer : Plugin
 				else
 				{
 					YoutubeDl = searchFile;
+					dLoop = Task.Run(DownloadLoop);
+					
 				}
 			}
 		}
@@ -57,6 +73,8 @@ public class YoutubePlayer : Plugin
 			else
 			{
 				YoutubeDl = searchFile;
+				dLoop = Task.Run(DownloadLoop);
+				
 			}
 		}
 
@@ -66,6 +84,56 @@ public class YoutubePlayer : Plugin
 		UsedFunctions = Functions.MessageReceived;
 	}
 
+	private async Task DownloadLoop()
+	{
+		while (running)
+		{
+			if (!downloadQueue.IsEmpty)
+			{
+				Tuple<string, SocketMessage> data;
+				if(downloadQueue.TryDequeue(out data))
+				{
+					string vID = data.Item1;
+					SocketMessage message = data.Item2;
+					IVoiceChannel voiceChannel = ((IGuildUser)message.Author).VoiceChannel;
+
+					if (CachedVideos.ContainsKey(vID))
+					{
+						await SendAudioFile(voiceChannel, CachedVideos[vID]);
+						return;
+					}
+
+					string messageFormat = "Downloading Video...``{0}``\nElapsed: {1}";
+					RestUserMessage updateMessage = await message.Channel.SendMessageAsync(string.Format(messageFormat, "|", new TimeSpan(0)));
+
+					char[] spinner = { '|', '/', '-', '\\' };
+					FileInfo ytFile = await ytd.DownloadVideo(vID, (seconds) =>
+					{
+						TimeSpan ts = new TimeSpan(seconds/3600, (seconds/60)%60, seconds%60);
+						updateMessage.ModifyAsync((changes) =>
+						{
+							changes.Content = string.Format(messageFormat, spinner[seconds % spinner.Length], ts);
+						});
+					});
+
+					if (ytFile == null)
+					{
+						await message.Channel.SendMessageAsync("Failure in getting the file.");
+					}
+					else
+					{
+						string yFile = ytFile.FullName;
+						CachedVideos.Add(vID, yFile);
+
+						await message.DeleteAsync();
+						await SendAudioFile(voiceChannel, yFile);
+					}
+				}
+			}
+
+			await Task.Delay(100);
+		}
+	}
 	public async override Task MessageReceived(SocketMessage message)
 	{
 		if(YoutubeDl != null)
@@ -90,8 +158,7 @@ public class YoutubePlayer : Plugin
 			}
 			else if(args[0] == "-play" && args.Length > 1)
 			{
-				IVoiceChannel voiceChannel = ((IGuildUser)message.Author).VoiceChannel;
-				if (voiceChannel == null)
+				if (((IGuildUser)message.Author).VoiceChannel == null)
 				{
 					await message.Channel.SendMessageAsync("You must be connected to a voice channel!");
 					return;
@@ -102,29 +169,8 @@ public class YoutubePlayer : Plugin
 				{
 					await message.Channel.SendMessageAsync("Invalid youtube link.");
 				}
-
-				string vID = match.Groups[1].Value;
-
-				if (CachedVideos.ContainsKey(vID))
-				{
-					await SendAudioFile(voiceChannel, CachedVideos[vID]);
-					return;
-				}
-
-				FileInfo ytFile = ytd.DownloadVideo(vID);
-
-				if(ytFile == null)
-				{
-					await message.Channel.SendMessageAsync("Failure in getting the file.");
-				}
-				else
-				{
-					string yFile = ytFile.FullName;
-					CachedVideos.Add(vID, yFile);
-
-					await message.DeleteAsync();
-					await SendAudioFile(voiceChannel, yFile);
-				}
+				
+				downloadQueue.Enqueue(new Tuple<string, SocketMessage>(match.Groups[1].Value, message));
 			}
 		}
 	}

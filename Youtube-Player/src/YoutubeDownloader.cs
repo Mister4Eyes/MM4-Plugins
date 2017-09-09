@@ -46,7 +46,7 @@ namespace Youtube_Player.src
 		}
 
 
-		public FileInfo DownloadVideo(string url)
+		public async Task<FileInfo> DownloadVideo(string url, Action<int> updateFunction)
 		{
 			Match match = Regex.Match(url, pattern);
 			if (match.Success)
@@ -93,6 +93,8 @@ namespace Youtube_Player.src
 				while (!process.HasExited && sw.Elapsed.TotalMinutes < 10)
 				{
 					process.Refresh();
+					updateFunction((int)Math.Round(sw.Elapsed.TotalSeconds));
+					await Task.Delay(500);
 				}
 
 				sw.Stop();
